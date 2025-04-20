@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Dashboard</title>
+
+        <!-- Google Charts -->
+        <script src="https://www.gstatic.com/charts/loader.js"></script>
+
+        <!-- Dayjs -->
+        <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+
+        <script type="text/javascript">
+            google.charts.load("current", { packages: ["corechart"] });
+            google.charts.setOnLoadCallback(drawChart);
+
+            function prettifyDateString(string) {
+                return dayjs(string).format("ddd M/D/YY");
+            }
+
+            const CATEGORIES = ["ata", "school", "tv", "youtube", "reading"];
+
+            function getStartOfWeek(date = dayjs()) {
+                return date.startOf("isoWeek");
+            }
+
+            function getTimePeriods(start, delta, count) {
+                const periods = [];
+                let current = start;
+
+                for (let i = 0; i < count; i++) {
+                    const next = current.add(delta);
+                    periods.push([current, next]);
+                    current = next;
+                }
+
+                return periods;
+            }
+
+            async function drawChart() {
+                const res = await fetch("/api/query");
+                const data = await res.json();
+
+                const days = [];
+                for (const day of Object.keys(data)) {
+                    days.push([
+                        day,
+                        ...CATEGORIES.map((cat) => data[day][cat]),
+                    ]);
+                }
+
+                const dataTable = google.visualization.arrayToDataTable([
+                    ["Category", ...CATEGORIES],
+                    ...days,
+                ]);
+
+                console.log(days);
+
+                const options = {
+                    title: "Computer Use",
+                    // chartArea: { width: "100%", height: "100%" },
+                    width: 800,
+                    height: 600,
+                    isStacked: true,
+                    legend: { position: "top", maxLines: 3 },
+                    bar: { groupWidth: "75%" },
+                };
+
+                const el = document.querySelector(".panel");
+
+                const chart = new google.visualization.BarChart(el);
+                chart.draw(dataTable, options);
+                window.addEventListener("resize", function () {
+                    chart.draw(dataTable, options);
+                });
+            }
+        </script>
+
+        <style>
+            body {
+                margin: 0;
+            }
+
+            #root {
+                height: calc(100vh - 4rem);
+                padding: 2rem;
+                background-color: #eee;
+                display: grid;
+                grid-template-columns: repeat(6, 1fr);
+                gap: 1rem;
+            }
+
+            .panel {
+                /* padding: 1rem; */
+                /* border: 1px solid #ddd;
+                background-color: #fefefe; */
+                height: 20rem;
+            }
+            .w-2 {
+                grid-column: span 2;
+            }
+            .w-3 {
+                grid-column: span 3;
+            }
+            .w-4 {
+                grid-column: span 4;
+            }
+            .w-5 {
+                grid-column: span 5;
+            }
+            .w-6 {
+                grid-column: span 6;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="root">
+            <div class="panel w-3"></div>
+        </div>
+    </body>
+</html>

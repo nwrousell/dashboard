@@ -1,3 +1,0 @@
-"""
-Big number / stat component
-"""
