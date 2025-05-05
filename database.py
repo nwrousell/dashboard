@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 sqlite3.register_adapter(
     datetime, lambda dt: dt.isoformat()
 )  # TODO: normalize timezone automatically
-# sqlite3.register_converter("timestamp", lambda s: datetime.fromisoformat(s.decode()))
+sqlite3.register_converter("timestamp", lambda s: datetime.fromisoformat(s.decode()))
 sqlite3.register_adapter(timedelta, lambda td: td.seconds)
 
 
@@ -23,8 +23,10 @@ class Database:
         self.cursor: Optional[sqlite3.Cursor] = None
 
     def __enter__(self):
-        self.conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES)
-        # self.conn.row_factory = sqlite3.Row  # optional: return rows as dict-like
+        self.conn = sqlite3.connect(
+            self.db_path, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
+        self.conn.row_factory = sqlite3.Row  # optional: return rows as dict-like
         self.cursor = self.conn.cursor()
         return self
 
@@ -53,6 +55,55 @@ class Database:
             rows,
         )
         print(f"inserted {len(rows)} rows into {table} table")
+
+    def get_rows_in_time_range(
+        self,
+        table: str,
+        start_time: datetime,
+        end_time: datetime,
+        columns: Optional[List[str]] = None,
+    ) -> List[Tuple]:
+        """
+        Returns all rows in a table between start_time and end_time (inclusive).
+
+        :param table: String, name of the table to query.
+        :param start_time: Start datetime (inclusive).
+        :param end_time: End datetime (inclusive).
+        :param columns: Optional list of columns to select. Selects all columns if None.
+        :return: List of tuples representing the rows in the given time range.
+        """
+        col_str = ", ".join(columns) if columns else "*"
+        query = f"""
+            SELECT {col_str}
+            FROM {table}
+            WHERE timestamp BETWEEN ? AND ?
+        """
+        self.cursor.execute(query, (start_time.isoformat(), end_time.isoformat()))
+        return self.cursor.fetchall()
+
+    def get_last_rows(
+        self,
+        table: str,
+        limit: int,
+        columns: Optional[List[str]] = None,
+    ) -> List[Tuple]:
+        """
+        Returns the last `limit` rows from a table, ordered by timestamp descending.
+
+        :param table: Name of the table.
+        :param limit: Number of most recent rows to retrieve.
+        :param columns: Optional list of columns to select. Selects all columns if None.
+        :return: List of tuples representing the most recent rows.
+        """
+        col_str = ", ".join(columns) if columns else "*"
+        query = f"""
+            SELECT {col_str}
+            FROM {table}
+            ORDER BY timestamp DESC
+            LIMIT {limit}
+        """
+        self.cursor.execute(query)
+        return [dict(row) for row in self.cursor.fetchall()]
 
     def query(
         self,

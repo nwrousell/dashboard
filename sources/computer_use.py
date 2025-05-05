@@ -12,7 +12,7 @@ import logging
 import os
 import socket
 from datetime import date, datetime, time, timedelta
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import aw_client
 from aw_client import queries
@@ -20,6 +20,7 @@ from aw_core import Event
 from aw_transform import flood
 
 from database import Database
+from fetch import Source
 
 
 OUTPUT_HTML = os.environ.get("OUTPUT_HTML", "").lower() == "true"
@@ -29,9 +30,10 @@ day_offset = timedelta(hours=4)
 
 # NOTE: we ignore case for all
 CATEGORY_REGEXES = {
-    "ata": r"\bata\b",
-    "school": r"\b[a-zA-Z]{2,4}\d{2,4}\b",  # match on course codes with 2-4 letters, then 2-4 digits
+    "ata": r"\bata\b|PowerShell|documentation|code",
+    "school": r"\b[a-zA-Z]{2,4}\d{2,4}\b|data-aggregator|PowerShell|Pset|problem set|documentation|Lecture|code",  # match on course codes with 2-4 letters, then 2-4 digits
     "tv": r"netflix|crunchyroll",
+    "research": r"arxiv|diffusion|flow matching",
     "youtube": r"youtube",
     "languages": r"lingq",
     "reading": r"instapaper|crafting interpreters",
@@ -114,57 +116,35 @@ def query(timeperiods: List[List[date]], hostname: str):
     return res
 
 
-def computer_use_fetch():
-    """
-    Fetch from last fetched timestamp until now, flood events up to max_break, and insert into database
-    """
-    hostname = socket.gethostname()
+class ComputerUseSource(Source):
+    id = "computer_use"
+    schema = ["timestamp timestamp", "duration timedelta", "category TEXT"]
 
-    with open("./sources/last_queried.json", "rt") as f:
-        last_queried = json.load(f)
+    @classmethod
+    def fetch(cls, last_queried: Optional[datetime]) -> List[Dict]:
+        """
+        Fetch from last fetched timestamp until now, flood events up to max_break, and insert into database
+        """
+        hostname = socket.gethostname()
 
-    is_first_fetch = False
-    if "computer_use" in last_queried:
-        fetch_start = date.fromisoformat(last_queried["computer_use"])
-    else:
-        fetch_start = (
-            datetime.combine(date(2020, 7, 15), time()) + day_offset
-        ).astimezone()
-        is_first_fetch = True
-    fetch_end = datetime.now().astimezone()
+        if last_queried is not None:
+            fetch_start = last_queried
+        else:
+            fetch_start = (
+                datetime.combine(date(2020, 7, 15), time()) + day_offset
+            ).astimezone()
+        fetch_end = datetime.now().astimezone()
 
-    # fetch raw events from API and classify with regex
-    raw_events = query([[fetch_start, fetch_end]], hostname)[0]["events"]
+        # fetch raw events from API and classify with regex
+        raw_events = query([[fetch_start, fetch_end]], hostname)[0]["events"]
 
-    # flood to join close segments for each category
-    joined_events: List[JoinedEvent] = []
-    for category in CATEGORY_REGEXES.keys():
-        category_events = [e for e in raw_events if category in e["data"]["$category"]]
-        res = join_close_events(category_events, max_break=300)
-        joined_events.extend(res)
+        # flood to join close segments for each category
+        joined_events: List[JoinedEvent] = []
+        for category in CATEGORY_REGEXES.keys():
+            category_events = [
+                e for e in raw_events if category in e["data"]["$category"]
+            ]
+            res = join_close_events(category_events, max_break=300)
+            joined_events.extend(res)
 
-    # insert into db
-    with Database() as db:
-        if is_first_fetch:
-            db.create_table(
-                "computer_use",
-                ["timestamp timestamp", "duration timedelta", "category TEXT"],
-            )
-
-        db.insert(
-            "computer_use",
-            ["timestamp", "duration", "category"],
-            [asdict(je) for je in joined_events],
-        )
-
-    # update last_queried
-    last_queried["computer_use"] = fetch_end.isoformat()
-    with open("./sources/last_queried.json", "wt") as f:
-        json.dump(last_queried, f)
-
-
-if __name__ == "__main__":
-    # ignore log warnings in aw_transform
-    logging.getLogger("aw_transform").setLevel(logging.ERROR)
-
-    computer_use_fetch()
+        return [asdict(je) for je in joined_events]
